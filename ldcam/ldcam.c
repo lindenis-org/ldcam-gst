@@ -368,6 +368,7 @@ int ldcam_photo(LDCAM_STATE *state)
 
 	g_object_set(G_OBJECT (state->camera_src), "device", DEV, NULL);
 	g_object_set(G_OBJECT(state->fake_sink), "signal-handoffs", TRUE, NULL);
+	g_object_set(G_OBJECT(state->sunxi_sink), "video-memory", 22, NULL);
 	//g_object_set(G_OBJECT(state->sunxi_sink), "full-screen", TRUE, NULL);
 
 	bus = gst_pipeline_get_bus(GST_PIPELINE (state->pipeline));
@@ -544,6 +545,7 @@ int ldcam_video(LDCAM_STATE *state)
 
 	g_object_set(G_OBJECT (state->camera_src), "device", DEV, NULL);
 	g_object_set(G_OBJECT (state->camera_src), "do-timestamp", TRUE, NULL);
+	g_object_set(G_OBJECT(state->sunxi_sink), "video-memory", 22, NULL);
 	//g_object_set(G_OBJECT(state->sunxi_sink), "full-screen", TRUE, NULL);
 
 	g_object_set(G_OBJECT(state->file_sink), "location", state->path, NULL);
