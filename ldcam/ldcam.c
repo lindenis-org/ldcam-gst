@@ -53,11 +53,12 @@ typedef struct
 static char* commd_line[]=
 {
 	"-?:	get help infomaiton of this app",
-	"-c:	take a photo of camera",
-	"-v:	capture the video of camera",
+	"-c:	capture a photo of camera",
+	"-v:	record the video of camera",
 	"-w:	set  photo/video width of the file",
 	"-h:	set  photo/video height of the file",
 	"-o:	set  photo/video output path of the file"
+	"-t:	set  photo shot wait time, or video record time"
 };
 static void display_cmd_parameters(const char *app_name)
 {
@@ -72,7 +73,7 @@ int default_state(LDCAM_STATE *state)
 	state->mode = 0;
 	state->width = 1280;
 	state->height = 720;
-	state->time = 10;
+	state->time = 0;
 	//strcpy(state->path, "");
 	memset(state->path, 0, sizeof(state->path));
 
@@ -268,17 +269,33 @@ void *photo_shot(void *arg)
 	LDCAM_STATE *ld_state = (LDCAM_STATE *)arg;
 	signal(SIGINT, exit_handler);
 	int i = ld_state->time;
-	while(i > 0)
+	if(i <= 0)
 	{
-		fprintf(stdout, "photo_shot_wait %d s\n", i);
-		i = i -1;
-		if(flag)
+		while(1)
 		{
-			//g_main_loop_quit (ld_state->loop);
-			flag = 0;
-			break;
+			fprintf(stdout, "wait for your ctrl + c exit\n");
+			if(flag)
+			{
+				//g_main_loop_quit (ld_state->loop);
+				flag = 0;
+				break;
+			}
+			sleep(1);
 		}
-		sleep(1);
+	}
+	else{
+		while(i > 0)
+		{
+			fprintf(stdout, "photo_shot_wait %d s\n", i);
+			i = i -1;
+			if(flag)
+			{
+				//g_main_loop_quit (ld_state->loop);
+				flag = 0;
+				break;
+			}
+			sleep(1);
+		}
 	}
 	ld_state->fake_sink_id = g_signal_connect(G_OBJECT(ld_state->fake_sink), "handoff", G_CALLBACK(buffer_probe_callback), ld_state);
 	return NULL;
@@ -370,6 +387,7 @@ int ldcam_photo(LDCAM_STATE *state)
 	g_object_set(G_OBJECT(state->fake_sink), "signal-handoffs", TRUE, NULL);
 	g_object_set(G_OBJECT(state->sunxi_sink), "video-memory", 32, NULL);
 	//g_object_set(G_OBJECT(state->sunxi_sink), "full-screen", TRUE, NULL);
+	//g_object_set(G_OBJECT(state->jpeg_enc), "quality", 100, NULL);
 
 	bus = gst_pipeline_get_bus(GST_PIPELINE (state->pipeline));
 	bus_watch_id = gst_bus_add_watch (bus, (GstBusFunc)photo_bus_callback, state->loop);
@@ -467,21 +485,39 @@ static gboolean video_bus_callback(GstBus *bus, GstMessage *message, gpointer da
 void *video_exit(void *arg)
 {
 	fprintf(stdout, "video_exit_callback\n");
-	LDCAM_STATE *state = (LDCAM_STATE *)arg;
+	LDCAM_STATE *ld_state = (LDCAM_STATE *)arg;
 	signal(SIGINT, exit_handler);
-
-	while(1)
+	int i = ld_state->time;
+	if(i <= 0)
 	{
-		if(flag)
+		while(1)
 		{
-			g_main_loop_quit (state->loop);
-			flag = 0;
-			break;
+			fprintf(stdout, "wait for your ctrl + c exit\n");
+			if(flag)
+			{
+				flag = 0;
+				break;
+			}
+			sleep(1);
 		}
-		sleep(1);
 	}
+	else{
+		while(i > 0)
+		{
+			fprintf(stdout, "capture video wait %d s\n", i);
+			i = i -1;
+			if(flag)
+			{
+				flag = 0;
+				break;
+			}
+			sleep(1);
+		}
+	}
+	g_main_loop_quit (ld_state->loop);
 	return NULL;
 }
+
 int video_thread_create(LDCAM_STATE *state)
 {
 	pthread_t thread_id = 0;
