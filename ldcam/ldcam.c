@@ -21,6 +21,7 @@ typedef struct
 	int width;
 	int height;
 	int time;
+	char dev[8];
 	char path[64];
 
 	GMainLoop *loop;
@@ -57,8 +58,9 @@ static char* commd_line[]=
 	"-v:	record the video of camera",
 	"-w:	set  photo/video width of the file",
 	"-h:	set  photo/video height of the file",
-	"-o:	set  photo/video output path of the file"
-	"-t:	set  photo shot wait time, or video record time"
+	"-o:	set  photo/video output path of the file",
+	"-t:	set  photo shot wait time, or video record time",
+	"-d:	set  device port of camera"
 };
 static void display_cmd_parameters(const char *app_name)
 {
@@ -74,7 +76,7 @@ int default_state(LDCAM_STATE *state)
 	state->width = 1280;
 	state->height = 720;
 	state->time = 0;
-	//strcpy(state->path, "");
+	strcpy(state->dev, "0");
 	memset(state->path, 0, sizeof(state->path));
 
 	return 0;
@@ -112,6 +114,20 @@ int paser_cmdline(int argc, const char **argv, LDCAM_STATE *state)
 					valid = 0;
 				else{
 					state->mode = tmp_value;
+				}
+				break;
+			case 'd':
+				if(!argv[i + 1])
+				{
+					set_value = 0;
+					valid = 0;
+					break;
+				}
+				if (sscanf(argv[i + 1], "%s", state->dev) != 1)
+					valid = 0;
+				else{
+					//state->dev = tmp_value;
+					i++;
 				}
 				break;
 			case 'w':
@@ -168,7 +184,8 @@ int paser_cmdline(int argc, const char **argv, LDCAM_STATE *state)
 				else{
 					char tmp[32];
 					char home_path[32];
-					strcpy(home_path, getenv("HOME"));
+					//strcpy(home_path, getenv("HOME"));
+					getcwd(home_path, sizeof(home_path));
 					strcat(home_path, "/");
 				
 					int len = strlen(state->path);
@@ -353,9 +370,13 @@ int ldcam_photo(LDCAM_STATE *state)
 {
 	fprintf(stdout, "create gst work for photo\n");
 
+
 	GstCaps *caps;
 	GstBus *bus;
 	guint bus_watch_id;
+
+	char dev_port[32] = "/dev/video";
+	strcat(dev_port, state->dev);
 
 	gst_init(NULL, NULL);
 	state->loop = g_main_loop_new (NULL, FALSE);
@@ -383,7 +404,8 @@ int ldcam_photo(LDCAM_STATE *state)
 		return -1;
 	}
 
-	g_object_set(G_OBJECT (state->camera_src), "device", DEV, NULL);
+	//g_object_set(G_OBJECT (state->camera_src), "device", DEV, NULL);
+	g_object_set(G_OBJECT (state->camera_src), "device", dev_port, NULL);
 	g_object_set(G_OBJECT(state->fake_sink), "signal-handoffs", TRUE, NULL);
 	g_object_set(G_OBJECT(state->sunxi_sink), "video-memory", 32, NULL);
 	//g_object_set(G_OBJECT(state->sunxi_sink), "full-screen", TRUE, NULL);
@@ -544,6 +566,9 @@ int ldcam_video(LDCAM_STATE *state)
 	GstBus *bus;
 	guint bus_watch_id;
 
+	char dev_port[32] = "/dev/video";
+	strcat(dev_port, state->dev);
+
 	gst_init(NULL, NULL);
 	state->loop = g_main_loop_new (NULL, FALSE);
 
@@ -579,7 +604,8 @@ int ldcam_video(LDCAM_STATE *state)
 		return -1;
 	}
 
-	g_object_set(G_OBJECT (state->camera_src), "device", DEV, NULL);
+	//g_object_set(G_OBJECT (state->camera_src), "device", DEV, NULL);
+	g_object_set(G_OBJECT (state->camera_src), "device", dev_port, NULL);
 	g_object_set(G_OBJECT (state->camera_src), "do-timestamp", TRUE, NULL);
 	g_object_set(G_OBJECT(state->sunxi_sink), "video-memory", 32, NULL);
 	//g_object_set(G_OBJECT(state->sunxi_sink), "full-screen", TRUE, NULL);
