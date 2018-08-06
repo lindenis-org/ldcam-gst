@@ -195,6 +195,7 @@ int paser_cmdline(int argc, const char **argv, LDCAM_STATE *state)
 						if (len > p_suf_len)
 						{
 				       			strncpy(tmp, state->path+(len-p_suf_len), p_suf_len);
+							tmp[p_suf_len] = '\0';
 							if(strcmp(tmp, P_SUF_NAME) != 0)
 							{
 								strcat(state->path, P_SUF_NAME);
