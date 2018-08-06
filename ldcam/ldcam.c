@@ -22,7 +22,7 @@ typedef struct
 	int height;
 	int time;
 	char dev[8];
-	char path[64];
+	char path[256];
 
 	GMainLoop *loop;
 	GstElement *pipeline;
@@ -182,8 +182,8 @@ int paser_cmdline(int argc, const char **argv, LDCAM_STATE *state)
 				if (sscanf(argv[i + 1], "%s", state->path) != 1)
 					valid = 0;
 				else{
-					char tmp[32];
-					char home_path[32];
+					char tmp[256];
+					char home_path[256];
 					//strcpy(home_path, getenv("HOME"));
 					getcwd(home_path, sizeof(home_path));
 					strcat(home_path, "/");
