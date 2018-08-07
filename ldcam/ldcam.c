@@ -6,23 +6,24 @@
 #include <gst/gst.h>
 #include <glib.h>
 
-#define DEV "/dev/video0"
 #define P_SUF_NAME	".jpg"
 #define V_SUF_NAME	".ts"
 
 #define VIDEO_AUDIO
-#define VIDEO_PHOTO
 
 static int flag = 0;
 
 typedef struct
 {
 	int mode;
+	int display;
 	int width;
 	int height;
 	int time;
 	char dev[8];
 	char path[256];
+
+	int err_status;
 
 	GMainLoop *loop;
 	GstElement *pipeline;
@@ -53,14 +54,15 @@ typedef struct
 
 static char* commd_line[]=
 {
-	"-?:	get help infomaiton of this app",
+	"-?:	get help information of this app, same as --help",
 	"-c:	capture a photo of camera",
 	"-v:	record the video of camera",
 	"-w:	set  photo/video width of the file",
 	"-h:	set  photo/video height of the file",
 	"-o:	set  photo/video output path of the file",
 	"-t:	set  photo shot wait time, or video record time",
-	"-d:	set  device port of camera"
+	"-d:	set  device port of camera",
+	"--nodisplay	disable screen display",
 };
 static void display_cmd_parameters(const char *app_name)
 {
@@ -73,9 +75,11 @@ static void display_cmd_parameters(const char *app_name)
 int default_state(LDCAM_STATE *state)
 {
 	state->mode = 0;
+	state->display = 1;
 	state->width = 1280;
 	state->height = 720;
 	state->time = 0;
+	state->err_status = 0;
 	strcpy(state->dev, "0");
 	memset(state->path, 0, sizeof(state->path));
 
@@ -96,6 +100,11 @@ int paser_cmdline(int argc, const char **argv, LDCAM_STATE *state)
 		if(argv[i][0] != '-')
 		{
 			valid = 0;
+			continue;
+		}
+		if(strcmp("--nodisplay", argv[i]) == 0)
+		{
+			state->display = 0;
 			continue;
 		}
 		tmp_value = 0;
@@ -377,6 +386,8 @@ int ldcam_photo(LDCAM_STATE *state)
 	GstBus *bus;
 	guint bus_watch_id;
 
+	GstStateChangeReturn ret;
+
 	char dev_port[32] = "/dev/video";
 	strcat(dev_port, state->dev);
 
@@ -406,7 +417,6 @@ int ldcam_photo(LDCAM_STATE *state)
 		return -1;
 	}
 
-	//g_object_set(G_OBJECT (state->camera_src), "device", DEV, NULL);
 	g_object_set(G_OBJECT (state->camera_src), "device", dev_port, NULL);
 	g_object_set(G_OBJECT(state->fake_sink), "signal-handoffs", TRUE, NULL);
 	g_object_set(G_OBJECT(state->sunxi_sink), "video-memory", 32, NULL);
@@ -416,19 +426,35 @@ int ldcam_photo(LDCAM_STATE *state)
 	bus = gst_pipeline_get_bus(GST_PIPELINE (state->pipeline));
 	bus_watch_id = gst_bus_add_watch (bus, (GstBusFunc)photo_bus_callback, state->loop);
 	gst_object_unref(bus);
-#ifdef VIDEO_PHOTO
-	gst_bin_add_many (GST_BIN (state->pipeline), state->camera_src, state->src_filter,
-			state->video_cov, state->tee, state->screen_queue, state->sunxi_sink,
-			state->fake_queue, state->jpeg_enc, state->fake_sink, NULL);
-#else
-	gst_bin_add_many (GST_BIN (state->pipeline), state->camera_src, state->src_filter, state->video_cov, state->tee, state->screen_queue, state->sunxi_sink, NULL);
-#endif
 
-	caps = gst_caps_new_simple ("video/x-raw",
-			"format", G_TYPE_STRING, "I420",
-			"width", G_TYPE_INT, state->width,
-			"height", G_TYPE_INT, state->height,
-			NULL);
+	if(state->display)
+	{
+		gst_bin_add_many (GST_BIN (state->pipeline), state->camera_src, state->src_filter,
+				state->video_cov, state->tee, state->screen_queue, state->sunxi_sink,
+				state->fake_queue, state->jpeg_enc, state->fake_sink, NULL);
+	}
+	else{
+		gst_bin_add_many (GST_BIN (state->pipeline), state->camera_src, state->src_filter,
+				state->jpeg_enc, state->fake_sink, NULL);
+
+	}
+
+	if(state->display)
+	{
+		caps = gst_caps_new_simple ("video/x-raw",
+				"format", G_TYPE_STRING, "I420",
+				"width", G_TYPE_INT, state->width,
+				"height", G_TYPE_INT, state->height,
+				NULL);
+	}
+	else{
+		caps = gst_caps_new_simple ("video/x-raw",
+				"format", G_TYPE_STRING, "NV12",
+				"width", G_TYPE_INT, state->width,
+				"height", G_TYPE_INT, state->height,
+				NULL);
+
+	}
 	if(!gst_element_link_filtered(state->camera_src, state->src_filter, caps))
 	{
 		fprintf(stderr, "link src_filter element fail \n");
@@ -436,25 +462,34 @@ int ldcam_photo(LDCAM_STATE *state)
 	}
 	gst_caps_unref(caps);
 
-#ifdef VIDEO_PHOTO
-	if(!gst_element_link_many (state->src_filter, state->video_cov, state->tee, state->screen_queue, state->sunxi_sink, NULL))
+	if(state->display)
 	{
-		fprintf(stderr, "link screen_queue fail\n");
+		if(!gst_element_link_many (state->src_filter, state->video_cov, state->tee, state->screen_queue, state->sunxi_sink, NULL))
+		{
+			fprintf(stderr, "link screen_queue fail\n");
+			return -1;
+		}
+		if(!gst_element_link_many (state->tee, state->fake_queue, state->jpeg_enc, state->fake_sink, NULL))
+		{
+			fprintf(stderr, "link fake_queue fail\n");
+			return -1;
+		}
+	}
+	else
+	{
+		if(!gst_element_link_many (state->src_filter, state->jpeg_enc, state->fake_sink, NULL))
+		{
+			fprintf(stderr, "link only fake sink fail\n");
+			return -1;
+		}
+	}
+	ret = gst_element_set_state (state->pipeline, GST_STATE_PLAYING);
+
+	if(ret == GST_STATE_CHANGE_FAILURE)
+	{
+		fprintf(stderr, "pipeline set playing  fail\n");
 		return -1;
 	}
-	if(!gst_element_link_many (state->tee, state->fake_queue, state->jpeg_enc, state->fake_sink, NULL))
-	{
-		fprintf(stderr, "link fake_queue fail\n");
-		return -1;
-	}
-#else
-	if(!gst_element_link_many (state->src_filter, state->video_cov, state->tee, state->screen_queue, state->sunxi_sink, NULL))
-	{
-		fprintf(stderr, "link screen_queue fail\n");
-		return -1;
-	}
-#endif
-	gst_element_set_state (state->pipeline, GST_STATE_PLAYING);
 #if 1
 	if(shot_thread_create(state) != 0)
 	{
@@ -568,6 +603,8 @@ int ldcam_video(LDCAM_STATE *state)
 	GstBus *bus;
 	guint bus_watch_id;
 
+	GstStateChangeReturn ret;
+
 	char dev_port[32] = "/dev/video";
 	strcat(dev_port, state->dev);
 
@@ -606,7 +643,6 @@ int ldcam_video(LDCAM_STATE *state)
 		return -1;
 	}
 
-	//g_object_set(G_OBJECT (state->camera_src), "device", DEV, NULL);
 	g_object_set(G_OBJECT (state->camera_src), "device", dev_port, NULL);
 	g_object_set(G_OBJECT (state->camera_src), "do-timestamp", TRUE, NULL);
 	g_object_set(G_OBJECT(state->sunxi_sink), "video-memory", 32, NULL);
@@ -615,27 +651,52 @@ int ldcam_video(LDCAM_STATE *state)
 	g_object_set(G_OBJECT(state->file_sink), "location", state->path, NULL);
 
 	g_object_set(G_OBJECT (state->alsa_src), "do-timestamp", TRUE, NULL);
-	g_object_set(G_OBJECT (state->alsa_src), "provide-clock", FALSE, NULL);
+	//g_object_set(G_OBJECT (state->alsa_src), "provide-clock", FALSE, NULL);
 	
 	bus = gst_pipeline_get_bus(GST_PIPELINE (state->pipeline));
 	bus_watch_id = gst_bus_add_watch (bus, (GstBusFunc)video_bus_callback, state->loop);
 	gst_object_unref(bus);
 
 #ifdef VIDEO_AUDIO
-	gst_bin_add_many (GST_BIN (state->pipeline), state->camera_src, state->src_filter,
-			state->video_cov, state->tee, state->screen_queue, state->sunxi_sink,
-			state->file_queue, state->video_covf, state->file_enc, state->file_mux, state->file_sink,
-			state->alsa_src, state->alsa_queue, state->alsa_filter, state->alsa_enc, state->file_mux, NULL);
+	if(state->display)
+	{
+		gst_bin_add_many (GST_BIN (state->pipeline), state->camera_src, state->src_filter,
+				state->video_cov, state->tee, state->screen_queue, state->sunxi_sink,
+				state->file_queue, state->video_covf, state->file_enc, state->file_mux, state->file_sink,
+				state->alsa_src, state->alsa_queue, state->alsa_filter, state->alsa_enc, state->file_mux, NULL);
+	}
+	else{
+		gst_bin_add_many (GST_BIN (state->pipeline), state->camera_src, state->src_filter,
+				state->file_enc, state->file_mux, state->file_sink,
+				state->alsa_src, state->alsa_filter, state->alsa_enc, state->file_mux, NULL);
+	}
 #else
-	gst_bin_add_many (GST_BIN (state->pipeline), state->camera_src, state->src_filter,
-			state->video_cov, state->tee, state->screen_queue, state->sunxi_sink,
-			state->file_queue, state->video_covf, state->file_enc, state->file_mux, state->file_sink, NULL);
+	if(state->display)
+	{
+		gst_bin_add_many (GST_BIN (state->pipeline), state->camera_src, state->src_filter,
+				state->video_cov, state->tee, state->screen_queue, state->sunxi_sink,
+				state->file_queue, state->video_covf, state->file_enc, state->file_mux, state->file_sink, NULL);
+	}
+	else{
+		gst_bin_add_many (GST_BIN (state->pipeline), state->camera_src, state->src_filter,
+				state->file_enc, state->file_mux, state->file_sink, NULL);
+	}
 #endif
-	caps = gst_caps_new_simple ("video/x-raw",
-			"width", G_TYPE_INT, state->width,
-			"height", G_TYPE_INT, state->height,
-			"format", G_TYPE_STRING, "I420",
-			NULL);
+	if(state->display)
+	{
+		caps = gst_caps_new_simple ("video/x-raw",
+				"width", G_TYPE_INT, state->width,
+				"height", G_TYPE_INT, state->height,
+				"format", G_TYPE_STRING, "I420",
+				NULL);
+	}
+	else{
+		caps = gst_caps_new_simple ("video/x-raw",
+				"width", G_TYPE_INT, state->width,
+				"height", G_TYPE_INT, state->height,
+				"format", G_TYPE_STRING, "NV12",
+				NULL);
+	}
 	if(!gst_element_link_filtered(state->camera_src, state->src_filter, caps))
 	{
 		fprintf(stderr, "link src_filter element fail \n");
@@ -645,7 +706,7 @@ int ldcam_video(LDCAM_STATE *state)
 #ifdef VIDEO_AUDIO 
 	caps = gst_caps_new_simple ("audio/x-raw",
 			"format", G_TYPE_STRING, "S16LE",
-			"rate", G_TYPE_INT, (int)8000,
+			"rate", G_TYPE_INT, (int)44100,
 			"channels", G_TYPE_INT, (int)2, NULL);
 	if(!gst_element_link_filtered(state->alsa_src, state->alsa_filter, caps))
 	{
@@ -655,27 +716,48 @@ int ldcam_video(LDCAM_STATE *state)
 	gst_caps_unref(caps);
 
 #endif
-	if(!gst_element_link_many (state->src_filter, state->video_cov, state->tee, state->screen_queue, state->sunxi_sink, NULL))
+	if(state->display)
 	{
-		fprintf(stderr, "link screen_queue fail\n");
-		return -1;
-	}
-#if 1	
-	if(!gst_element_link_many (state->tee, state->file_queue, state->video_covf, state->file_enc, state->file_mux, state->file_sink, NULL))
-	{
-		fprintf(stderr, "link file_queue fail\n");
-		return -1;
-	}
-#endif
+		if(!gst_element_link_many (state->src_filter, state->video_cov, state->tee, state->screen_queue, state->sunxi_sink, NULL))
+		{
+			fprintf(stderr, "link screen_queue fail\n");
+			return -1;
+		}
+		if(!gst_element_link_many (state->tee, state->file_queue, state->video_covf, state->file_enc, state->file_mux, state->file_sink, NULL))
+		{
+			fprintf(stderr, "link file_queue fail\n");
+			return -1;
+		}
 #ifdef VIDEO_AUDIO 
-	if(!gst_element_link_many (state->alsa_filter, state->alsa_queue, state->alsa_enc, state->file_mux, NULL))
+		if(!gst_element_link_many (state->alsa_filter, state->alsa_queue, state->alsa_enc, state->file_mux, NULL))
+		{
+			fprintf(stderr, "link alsa_queue fail\n");
+			return -1;
+		}
+#endif
+	}
+	else{
+		if(!gst_element_link_many (state->src_filter, state->file_enc, state->file_mux, state->file_sink, NULL))
+		{
+			fprintf(stderr, "link file_queue fail\n");
+			return -1;
+		}
+#ifdef VIDEO_AUDIO 
+		if(!gst_element_link_many (state->alsa_filter, state->alsa_enc, state->file_mux, NULL))
+		{
+			fprintf(stderr, "link alsa_queue fail\n");
+			return -1;
+		}
+#endif
+	}
+
+	ret = gst_element_set_state (state->pipeline, GST_STATE_PLAYING);
+	
+	if(ret == GST_STATE_CHANGE_FAILURE)
 	{
-		fprintf(stderr, "link alsa_queue fail\n");
+		fprintf(stderr, "pipeline set playing  fail\n");
 		return -1;
 	}
-#endif
-
-	gst_element_set_state (state->pipeline, GST_STATE_PLAYING);
 #if 1
 	if(video_thread_create(state) != 0)
 	{
@@ -707,7 +789,7 @@ int main(int argc, const char **argv)
 
 	default_state(state);
 
-	if(argc == 1 || argv[1][1] == '?')
+	if(argc == 1 || argv[1][1] == '?' || !strcmp("--help", argv[1]))
 	{
 		display_cmd_parameters(argv[0]);
 		return -1;
